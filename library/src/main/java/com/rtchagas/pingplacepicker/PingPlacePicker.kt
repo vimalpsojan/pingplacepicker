@@ -6,6 +6,7 @@ import android.content.Intent
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.GooglePlayServicesNotAvailableException
+import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.places.api.model.Place
 import com.rtchagas.pingplacepicker.inject.PingKoinContext
 import com.rtchagas.pingplacepicker.inject.repositoryModule
@@ -30,10 +31,32 @@ class PingPlacePicker private constructor() {
         }
 
         /**
-         * This key will be used to all reverse geolocation request to Google Maps API.
+         * This key will be used to nearby searches and reverse geocoding
+         * requests to Google Maps HTTP API.
          */
-        fun setGeolocationApiKey(geoKey: String): IntentBuilder {
-            geoLocationApiKey = geoKey
+        fun setMapsApiKey(geoKey: String): IntentBuilder {
+            mapsApiKey = geoKey
+            return this
+        }
+
+        /**
+         * The initial location that the map must be pointing to.
+         * If this is set, PING will search for places near this location.
+         */
+        fun setLatLng(location: LatLng): IntentBuilder {
+            intent.putExtra(PlacePickerActivity.EXTRA_LOCATION, location)
+            return this
+        }
+
+        /**
+         * Enables URL signing for Google APIs that require it.
+         *
+         * Currently only Maps Statics API requires signing for some users.
+         *
+         * More info [here](https://developers.google.com/maps/documentation/maps-static/get-api-key#generating-digital-signatures)
+         */
+        fun setUrlSigningSecret(secretKey: String): IntentBuilder {
+            urlSigningSecret = secretKey
             return this
         }
 
@@ -49,6 +72,8 @@ class PingPlacePicker private constructor() {
                 throw GooglePlayServicesNotAvailableException(result)
             }
 
+            isNearbySearchEnabled = activity.resources.getBoolean(R.bool.enable_nearby_search)
+
             intent.setClass(activity, PlacePickerActivity::class.java)
             return intent
         }
@@ -61,9 +86,9 @@ class PingPlacePicker private constructor() {
             PingKoinContext.koinApp = koinApplication {
                 androidLogger()
                 androidContext(application)
-                modules(
+                modules(listOf(
                         repositoryModule,
-                        viewModelModule
+                        viewModelModule)
                 )
             }
         }
@@ -74,8 +99,13 @@ class PingPlacePicker private constructor() {
         const val EXTRA_PLACE = "extra_place"
 
         var androidApiKey: String = ""
-        var geoLocationApiKey: String = ""
+        var mapsApiKey: String = ""
 
+        var urlSigningSecret = ""
+
+        var isNearbySearchEnabled = false
+
+        @JvmStatic
         fun getPlace(intent: Intent): Place? {
             return intent.getParcelableExtra(EXTRA_PLACE)
         }

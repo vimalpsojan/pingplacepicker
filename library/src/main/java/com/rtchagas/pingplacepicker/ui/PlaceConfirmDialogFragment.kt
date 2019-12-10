@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -16,9 +17,11 @@ import com.google.android.libraries.places.api.model.Place
 import com.rtchagas.pingplacepicker.Config
 import com.rtchagas.pingplacepicker.PingPlacePicker
 import com.rtchagas.pingplacepicker.R
+import com.rtchagas.pingplacepicker.helper.UrlSignerHelper
 import com.rtchagas.pingplacepicker.inject.PingKoinComponent
 import com.rtchagas.pingplacepicker.viewmodel.PlaceConfirmDialogViewModel
 import com.rtchagas.pingplacepicker.viewmodel.Resource
+import com.squareup.picasso.Callback
 import com.squareup.picasso.Picasso
 import kotlinx.android.synthetic.main.fragment_dialog_place_confirm.view.*
 import org.koin.android.viewmodel.ext.android.viewModel
@@ -28,6 +31,7 @@ class PlaceConfirmDialogFragment : AppCompatDialogFragment(), PingKoinComponent 
 
     companion object {
 
+        private const val TAG = "Ping#PlaceConfirmDialog"
         private const val ARG_PLACE = "arg_place"
 
         fun newInstance(place: Place,
@@ -53,7 +57,7 @@ class PlaceConfirmDialogFragment : AppCompatDialogFragment(), PingKoinComponent 
         super.onCreate(savedInstanceState)
 
         // Check mandatory parameters for this fragment
-        if ((arguments == null) || (arguments?.getParcelable<Place>(ARG_PLACE) == null)) {
+        if (requireArguments().getParcelable<Place>(ARG_PLACE) == null) {
             throw IllegalArgumentException("You must pass a Place as argument to this fragment")
         }
 
@@ -68,11 +72,11 @@ class PlaceConfirmDialogFragment : AppCompatDialogFragment(), PingKoinComponent 
 
         builder.setTitle(R.string.picker_place_confirm)
                 .setView(getContentView(activity!!))
-                .setPositiveButton(android.R.string.ok) { dialog, which ->
+                .setPositiveButton(android.R.string.ok) { _, _ ->
                     confirmListener?.onPlaceConfirmed(place)
                     dismiss()
                 }
-                .setNegativeButton(R.string.picker_place_confirm_cancel) { dialog, which ->
+                .setNegativeButton(R.string.picker_place_confirm_cancel) { _, _ ->
                     // Just dismiss here...
                     dismiss()
                 }
@@ -98,11 +102,18 @@ class PlaceConfirmDialogFragment : AppCompatDialogFragment(), PingKoinComponent 
     private fun fetchPlaceMap(contentView: View) {
 
         if (resources.getBoolean(R.bool.show_confirmation_map)) {
-            val staticMapUrl = Config.STATIC_MAP_URL
-                    .format(place.latLng?.latitude,
-                            place.latLng?.longitude,
-                            PingPlacePicker.androidApiKey)
-            Picasso.get().load(staticMapUrl).into(contentView.ivPlaceMap)
+            val staticMapUrl = getFinalMapUrl()
+            Picasso.get().load(staticMapUrl).into(contentView.ivPlaceMap, object : Callback {
+
+                override fun onSuccess() {
+                    contentView.ivPlaceMap.visibility = View.VISIBLE
+                }
+
+                override fun onError(e: Exception?) {
+                    Log.e(TAG, "Error loading map image", e)
+                    contentView.ivPlaceMap.visibility = View.GONE
+                }
+            })
         }
         else {
             contentView.ivPlaceMap.visibility = View.GONE
@@ -111,26 +122,44 @@ class PlaceConfirmDialogFragment : AppCompatDialogFragment(), PingKoinComponent 
 
     private fun fetchPlacePhoto(contentView: View) {
 
-        if (resources.getBoolean(R.bool.show_confirmation_photo)
-                && (place.photoMetadatas != null)) {
+        val photoMetadatas = place.photoMetadatas
 
-            viewModel.getPlacePhoto(place.photoMetadatas!![0]).observe(this,
+        if (resources.getBoolean(R.bool.show_confirmation_photo)
+                && photoMetadatas != null
+                && photoMetadatas.isNotEmpty()
+        ) {
+            val photoMetadata = photoMetadatas[0]
+            viewModel.getPlacePhoto(photoMetadata).observe(this,
                     Observer { handlePlacePhotoLoaded(contentView, it) })
         }
         else {
-            contentView.ivPlacePhoto.visibility = View.GONE
+            handlePlacePhotoLoaded(contentView, Resource.noData())
         }
     }
 
-    private fun handlePlacePhotoLoaded(contentView: View, result: Resource<Bitmap>) {
+    private fun getFinalMapUrl(): String {
 
+        val mapUrl = Config.STATIC_MAP_URL
+                .format(place.latLng?.latitude,
+                        place.latLng?.longitude,
+                        PingPlacePicker.mapsApiKey)
+
+        if (PingPlacePicker.urlSigningSecret.isNotEmpty()) {
+            // Sign the URL
+            return UrlSignerHelper.signUrl(mapUrl, PingPlacePicker.urlSigningSecret)
+        }
+
+        return mapUrl
+    }
+
+    private fun handlePlacePhotoLoaded(contentView: View, result: Resource<Bitmap>) {
         if (result.status == Resource.Status.SUCCESS) {
             TransitionManager.beginDelayedTransition(contentView as ViewGroup)
-            contentView.ivPlaceMap.visibility = View.VISIBLE
+            contentView.ivPlacePhoto.visibility = View.VISIBLE
             contentView.ivPlacePhoto.setImageBitmap(result.data)
         }
         else {
-            contentView.ivPlaceMap.visibility = View.GONE
+            contentView.ivPlacePhoto.visibility = View.GONE
         }
     }
 
